@@ -1,40 +1,34 @@
-const GuildConfig = require('../models/guildConfig');
+const TicketConfig = require('../models/ticketConfig');
 
 module.exports = async (interaction) => {
     if (!interaction.isButton()) return;
 
-    // Check if it's one of our role buttons
-    if (!interaction.customId.startsWith('role-button:')) return;
-
-    await interaction.deferReply({ ephemeral: true });
-
-    const roleId = interaction.customId.split(':')[1];
-
-    try {
-        // Find the server's configuration in the database
-        const config = await GuildConfig.findOne({ guildId: interaction.guildId });
-        if (!config || !config.buttonCategories.some(cat => cat.roleId === roleId)) {
-            return interaction.editReply({ content: 'This button is part of an outdated configuration.' });
+    // --- TICKET CREATION LOGIC ---
+    if (interaction.customId.startsWith('create-ticket:')) {
+        const config = await TicketConfig.findOne({ guildId: interaction.guildId });
+        if (!config) {
+            return interaction.reply({ content: 'This ticket system is no longer active.', ephemeral: true });
         }
 
-        const role = await interaction.guild.roles.fetch(roleId);
-        if (!role) {
-            return interaction.editReply({ content: 'The role associated with this button no longer exists.' });
-        }
-        
-        const member = interaction.member;
-
-        // Toggle the role
-        if (member.roles.cache.has(role.id)) {
-            await member.roles.remove(role);
-            await interaction.editReply(`✅ The **${role.name}** role has been removed.`);
-        } else {
-            await member.roles.add(role);
-            await interaction.editReply(`✅ You have been given the **${role.name}** role!`);
+        const buttonData = config.buttons.find(b => b.customId === interaction.customId);
+        if (!buttonData) {
+            return interaction.reply({ content: 'This button is part of an outdated configuration.', ephemeral: true });
         }
 
-    } catch (error) {
-        console.error('Error handling button interaction:', error);
-        await interaction.editReply({ content: 'An error occurred while processing your request.' });
+        // --- Placeholder for ticket creation ---
+        await interaction.reply({ content: `✅ A ticket for "${buttonData.label}" would be created now.`, ephemeral: true });
+
+        // TODO: Add your logic to create a new channel here.
+        // 1. Create a new text channel (e.g., `ticket-${interaction.user.username}`).
+        // 2. Set permissions so only the user and staff can see it.
+        // 3. Send a welcome message in the new channel, pinging the user and a staff role.
+
+        return; // End execution here for ticket buttons
     }
+
+    // --- ROLE ASSIGNMENT LOGIC (if you still have it) ---
+    // If you still have a role menu system, its logic would go here.
+    // if (interaction.customId.startsWith('role-button:')) {
+    //     // ... your role button logic
+    // }
 };
