@@ -1,3 +1,4 @@
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const TicketConfig = require('../models/ticketConfig');
 
 module.exports = async (interaction) => {
@@ -5,30 +6,82 @@ module.exports = async (interaction) => {
 
     // --- TICKET CREATION LOGIC ---
     if (interaction.customId.startsWith('create-ticket:')) {
+        await interaction.deferReply({ ephemeral: true });
+
         const config = await TicketConfig.findOne({ guildId: interaction.guildId });
         if (!config) {
-            return interaction.reply({ content: 'This ticket system is no longer active.', ephemeral: true });
+            return interaction.editReply({ content: 'This ticket system has not been configured properly.' });
         }
 
         const buttonData = config.buttons.find(b => b.customId === interaction.customId);
         if (!buttonData) {
-            return interaction.reply({ content: 'This button is part of an outdated configuration.', ephemeral: true });
+            return interaction.editReply({ content: 'This button is part of an outdated configuration.' });
         }
 
-        // --- Placeholder for ticket creation ---
-        await interaction.reply({ content: `✅ A ticket for "${buttonData.label}" would be created now.`, ephemeral: true });
+        const channelName = `ticket-${interaction.user.username}`;
+        
+        // Prevent duplicate tickets
+        const existingChannel = interaction.guild.channels.cache.find(c => c.name === channelName);
+        if (existingChannel) {
+            return interaction.editReply(`You already have an open ticket: ${existingChannel}`);
+        }
 
-        // TODO: Add your logic to create a new channel here.
-        // 1. Create a new text channel (e.g., `ticket-${interaction.user.username}`).
-        // 2. Set permissions so only the user and staff can see it.
-        // 3. Send a welcome message in the new channel, pinging the user and a staff role.
+        try {
+            // Create the ticket channel
+            const ticketChannel = await interaction.guild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildText,
+                parent: config.ticketCategoryId, // Place it in the configured category
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.id, // @everyone
+                        deny: [PermissionFlagsBits.ViewChannel],
+                    },
+                    {
+                        id: interaction.user.id, // The user who opened the ticket
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles],
+                    },
+                    {
+                        id: config.staffRoleId, // Staff role
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages],
+                    },
+                ],
+            });
 
-        return; // End execution here for ticket buttons
+            const embed = new EmbedBuilder()
+                .setTitle(`Ticket: ${buttonData.label}`)
+                .setDescription(`Welcome, ${interaction.user}! Please describe your issue, and a staff member will be with you shortly.`)
+                .setColor('#0099ff');
+            
+            const closeButton = new ButtonBuilder()
+                .setCustomId('close-ticket')
+                .setLabel('Close Ticket')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('🔒');
+
+            const row = new ActionRowBuilder().addComponents(closeButton);
+
+            await ticketChannel.send({
+                content: `${interaction.user} <@&${config.staffRoleId}>`, // Ping user and staff
+                embeds: [embed],
+                components: [row],
+            });
+
+            await interaction.editReply(`✅ Your ticket has been created: ${ticketChannel}`);
+
+        } catch (error) {
+            console.error('Error creating ticket channel:', error);
+            await interaction.editReply({ content: 'There was an error creating your ticket. Please contact an administrator.' });
+        }
+
+        return;
     }
 
-    // --- ROLE ASSIGNMENT LOGIC (if you still have it) ---
-    // If you still have a role menu system, its logic would go here.
-    // if (interaction.customId.startsWith('role-button:')) {
-    //     // ... your role button logic
-    // }
+    // --- TICKET CLOSING LOGIC ---
+    if (interaction.customId === 'close-ticket') {
+        await interaction.reply({ content: '🔒 Closing this ticket in 5 seconds...' });
+        setTimeout(() => {
+            interaction.channel.delete().catch(err => console.error("Couldn't delete channel:", err));
+        }, 5000);
+    }
 };
