@@ -1,35 +1,24 @@
-const { Schema, model } = require('mongoose');
+const mongoose = require('mongoose');
 
-const guildConfigSchema = new Schema({
+const guildConfigSchema = new mongoose.Schema({
     guildId: {
         type: String,
         required: true,
         unique: true,
     },
-    panelChannelId: {
+    // We store an array of categories, each with a label and role ID.
+    buttonCategories: [{
+        label: { type: String, required: true },
+        roleId: { type: String, required: true },
+    }],
+    messageId: { // To keep track of the message with the buttons
         type: String,
-        required: true,
+        required: false,
     },
-    panelMessageId: {
+    channelId: { // To know which channel the message is in
         type: String,
-        required: true,
-    },
-    logChannelId: {
-        type: String,
-        required: true,
-    },
-    supportRoleIds: {
-        type: [String], // An array of Role IDs
-        default: [],
-    },
-    ticketCategoryId: {
-        type: String,
-        required: true,
-    },
-    ticketCount: {
-        type: Number,
-        default: 0,
-    },
+        required: false,
+    }
 });
 
-module.exports = model('GuildConfig', guildConfigSchema);
+module.exports = mongoose.model('GuildConfig', guildConfigSchema);
