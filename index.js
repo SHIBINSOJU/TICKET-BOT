@@ -1,104 +1,82 @@
-// index.js
-
 const fs = require('node:fs');
 const path = require('node:path');
-// Import REST and Routes for command deployment
 const { Client, Collection, Events, GatewayIntentBits, REST, Routes } = require('discord.js');
-
-// Load environment variables from .env file
+const mongoose = require('mongoose');
 require('dotenv').config();
-const token = process.env.TOKEN;
-const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
 
-// Basic validation to ensure environment variables are loaded
-if (!token || !clientId || !guildId) {
-    console.error('Error: Missing TOKEN, CLIENT_ID, or GUILD_ID in .env file.');
-    process.exit(1); // Exit the script with an error code
-}
+const { TOKEN, CLIENT_ID, MONGO_URI } = process.env;
 
-// Create a new client instance
+// --- MAIN LOGIC ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// --- STEP 1: LOAD COMMAND FILES ---
+// --- COMMAND HANDLER SETUP ---
 client.commands = new Collection();
-const commands = []; // Array to hold command data for deployment
-const commandsPath = path.join(__dirname, 'commands');
+const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
-    
     if ('data' in command && 'execute' in command) {
-        // Add the command to the client's collection for execution
         client.commands.set(command.data.name, command);
-        // Add the command's JSON data to the array for deployment
-        commands.push(command.data.toJSON());
-    } else {
-        console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
     }
 }
 
-// --- STEP 2: AUTO-DEPLOY COMMANDS ON STARTUP ---
-// This section automatically registers/updates slash commands with Discord
-const rest = new REST({ version: '10' }).setToken(token);
-
-(async () => {
+// --- DEPLOYMENT LOGIC (RUNS ONLY WITH 'deploy' ARGUMENT) ---
+const deployCommands = async () => {
+    const commands = [];
+    for (const file of commandFiles) {
+        const command = require(path.join(commandsPath, file));
+        commands.push(command.data.toJSON());
+    }
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
-        console.log(`Started refreshing ${commands.length} application (/) commands.`);
-
-        // The put method is used to fully refresh all commands in the guild
-        const data = await rest.put(
-            Routes.applicationGuildCommands(clientId, guildId),
-            { body: commands },
-        );
-
-        console.log(`Successfully reloaded ${data.length} application (/) commands.`);
+        console.log(`🚀 Started refreshing ${commands.length} application (/) commands.`);
+        // We use 'put' to refresh all commands globally
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log(`✅ Successfully reloaded ${commands.length} application (/) commands.`);
     } catch (error) {
         console.error(error);
     }
-})();
+};
 
-
-// --- STEP 3: SETUP EVENT LISTENERS & RUN THE BOT ---
-
-// Listener for Slash Command Interactions
-client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = interaction.client.commands.get(interaction.commandName);
-
-    if (!command) {
-        console.error(`No command matching ${interaction.commandName} was found.`);
-        return;
-    }
-
+// --- DATABASE AND BOT STARTUP ---
+const startBot = async () => {
     try {
-        await command.execute(interaction);
+        await mongoose.connect(MONGO_URI);
+        console.log('✅ Connected to MongoDB.');
+
+        client.once(Events.ClientReady, c => {
+            console.log(`🤖 Ready! Logged in as ${c.user.tag}`);
+        });
+
+        // Command Execution Listener
+        client.on(Events.InteractionCreate, async interaction => {
+            if (!interaction.isChatInputCommand()) return;
+            const command = interaction.client.commands.get(interaction.commandName);
+            if (!command) return;
+            try {
+                await command.execute(interaction);
+            } catch (error) {
+                console.error(error);
+                await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            }
+        });
+        
+        // Dynamic Button Interaction Listener
+        client.on(Events.InteractionCreate, require('./src/events/buttonHandler'));
+
+        client.login(TOKEN);
     } catch (error) {
-        console.error(error);
-        await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+        console.error('❌ Failed to connect to MongoDB.', error);
+        process.exit(1);
     }
-});
+};
 
-// Listener for Button Interactions
-client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isButton()) return;
-    
-    if (interaction.customId === 'confirm_action') {
-        await interaction.reply({ content: 'You confirmed the action!', ephemeral: true });
-    } else {
-        // Generic response for any other button clicks
-        await interaction.reply({ content: `You clicked the button with ID: ${interaction.customId}`, ephemeral: true });
-    }
-});
-
-// Listener for when the client is ready
-client.once(Events.ClientReady, c => {
-    console.log(`✅ Ready! Logged in as ${c.user.tag}`);
-});
-
-// Log in to Discord with your client's token
-client.login(token);
-
+// --- SCRIPT EXECUTION ROUTER ---
+// This checks if you ran "node index.js deploy"
+if (process.argv[2] === 'deploy') {
+    deployCommands();
+} else {
+    startBot();
+}
