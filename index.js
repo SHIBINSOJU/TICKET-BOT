@@ -4,7 +4,12 @@ const { Client, Collection, Events, GatewayIntentBits, REST, Routes } = require(
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const { TOKEN, CLIENT_ID, MONGO_URI } = process.env;
+// Ensure all required environment variables are present
+const { TOKEN, CLIENT_ID, MONGO_URI, GUILD_ID } = process.env;
+if (!TOKEN || !CLIENT_ID || !MONGO_URI) {
+    console.error("❌ Error: TOKEN, CLIENT_ID, and MONGO_URI must be set in the .env file.");
+    process.exit(1);
+}
 
 // --- MAIN LOGIC ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -14,13 +19,26 @@ client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
+console.log('--- Loading Commands ---');
+let commandsLoadedCount = 0;
+
 for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
     if ('data' in command && 'execute' in command) {
         client.commands.set(command.data.name, command);
+        // New log for each command loaded
+        console.log(`[+] Loaded command: /${command.data.name}`);
+        commandsLoadedCount++;
+    } else {
+        console.log(`[!] Warning: The command at ${filePath} is missing a required "data" or "execute" property.`);
     }
 }
+
+// New summary log
+console.log(`\n✅ Successfully loaded a total of ${commandsLoadedCount} command(s).`);
+console.log('------------------------');
+
 
 // --- DEPLOYMENT LOGIC (RUNS ONLY WITH 'deploy' ARGUMENT) ---
 const deployCommands = async () => {
@@ -29,12 +47,32 @@ const deployCommands = async () => {
         const command = require(path.join(commandsPath, file));
         commands.push(command.data.toJSON());
     }
+
+    if (commands.length === 0) {
+        console.log('No commands found to deploy.');
+        return;
+    }
+
     const rest = new REST({ version: '10' }).setToken(TOKEN);
+
     try {
         console.log(`🚀 Started refreshing ${commands.length} application (/) commands.`);
-        // We use 'put' to refresh all commands globally
+
+        // CHOOSE ONE DEPLOYMENT METHOD:
+
+        // 1. GLOBAL DEPLOYMENT (Recommended for production)
+        // Takes up to an hour to update on all servers.
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log(`✅ Successfully reloaded ${commands.length} application (/) commands.`);
+        console.log(`✅ Successfully reloaded ${commands.length} application (/) commands globally.`);
+
+        // 2. GUILD-SPECIFIC DEPLOYMENT (Recommended for testing)
+        // Updates instantly for one server. Requires GUILD_ID in .env file.
+        /*
+        if (!GUILD_ID) return console.error("❌ Error: GUILD_ID is not set in the .env file for guild-specific deployment.");
+        await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+        console.log(`✅ Successfully reloaded ${commands.length} application (/) commands for the test guild.`);
+        */
+
     } catch (error) {
         console.error(error);
     }
@@ -74,7 +112,6 @@ const startBot = async () => {
 };
 
 // --- SCRIPT EXECUTION ROUTER ---
-// This checks if you ran "node index.js deploy"
 if (process.argv[2] === 'deploy') {
     deployCommands();
 } else {
