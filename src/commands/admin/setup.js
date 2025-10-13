@@ -1,90 +1,92 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const GuildConfig = require('../../models/guildConfig');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const GuildConfig = require('../models/guildConfig');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Sets up the ticket panel and system for this server.')
+        .setDescription('Sets up the role-assignment message with dynamic buttons.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addChannelOption(option =>
             option.setName('channel')
-                .setDescription('The channel where the ticket panel will be sent.')
+                .setDescription('The channel to send the role message to.')
                 .addChannelTypes(ChannelType.GuildText)
                 .setRequired(true))
-        .addChannelOption(option =>
-            option.setName('log_channel')
-                .setDescription('The channel where ticket logs will be sent.')
-                .addChannelTypes(ChannelType.GuildText)
+        .addStringOption(option =>
+            option.setName('buttons')
+                .setDescription('Define buttons like: Label1:@Role1, Label2:@Role2')
                 .setRequired(true))
-        .addChannelOption(option =>
-            option.setName('ticket_category')
-                .setDescription('The category where new ticket channels will be created.')
-                .addChannelTypes(ChannelType.GuildCategory)
-                .setRequired(true))
-        .addRoleOption(option =>
-            option.setName('support_role')
-                .setDescription('The role that will have access to all tickets.')
-                .setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Only admins can use this
+        .addStringOption(option =>
+            option.setName('message')
+                .setDescription('The message content to display above the buttons (e.g., "Get your roles!").')
+                .setRequired(true)),
 
     async execute(interaction) {
-        // Defer reply to give us more time to process
         await interaction.deferReply({ ephemeral: true });
 
-        const panelChannel = interaction.options.getChannel('channel');
-        const logChannel = interaction.options.getChannel('log_channel');
-        const ticketCategory = interaction.options.getChannel('ticket_category');
-        const supportRole = interaction.options.getRole('support_role');
+        const channel = interaction.options.getChannel('channel');
+        const buttonsDefinition = interaction.options.getString('buttons');
+        const messageContent = interaction.options.getString('message');
+
+        const buttonParts = buttonsDefinition.split(',').map(p => p.trim());
+
+        if (buttonParts.length > 5) {
+            return interaction.editReply('❌ You can only define a maximum of 5 buttons per row.');
+        }
+
+        const buttonCategories = [];
+        const actionRow = new ActionRowBuilder();
+
+        for (const part of buttonParts) {
+            // Regex to match the label and the role mention (e.g., "Gamer:<@&12345>")
+            const match = part.match(/([^:]+):<@&(\d+)>/);
+            if (!match) {
+                return interaction.editReply(`❌ Invalid format for button definition: "${part}". Please use \`Label:@Role\`.`);
+            }
+
+            const label = match[1].trim();
+            const roleId = match[2];
+            const role = await interaction.guild.roles.fetch(roleId);
+
+            if (!role) {
+                return interaction.editReply(`❌ The role for "${label}" could not be found.`);
+            }
+
+            // Add the validated data to our array for the database
+            buttonCategories.push({ label, roleId });
+
+            // Create the button for the message
+            actionRow.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`role-button:${roleId}`) // Unique ID format we can parse later
+                    .setLabel(label)
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
 
         try {
-            // Panel Embed
-            const panelEmbed = new EmbedBuilder()
-                .setTitle('Create a Ticket')
-                .setDescription('Select a category below to open a ticket. Please provide as much detail as possible when prompted.')
-                .setColor('#0099ff')
-                .setFooter({ text: `${interaction.guild.name} | Ticket System` });
+            // Send the message with buttons to the target channel
+            const message = await channel.send({
+                content: messageContent,
+                components: [actionRow],
+            });
 
-            // Buttons
-            const buttons = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('ticket_create_support')
-                        .setLabel('Support')
-                        .setStyle(ButtonStyle.Primary)
-                        .setEmoji('🧾'),
-                    new ButtonBuilder()
-                        .setCustomId('ticket_create_bug')
-                        .setLabel('Bug Report')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setEmoji('🐞'),
-                    new ButtonBuilder()
-                        .setCustomId('ticket_create_application')
-                        .setLabel('Staff Application')
-                        .setStyle(ButtonStyle.Success)
-                        .setEmoji('🧑‍💼')
-                );
-
-            // Send the panel message
-            const panelMessage = await panelChannel.send({ embeds: [panelEmbed], components: [buttons] });
-
-            // Save the configuration to MongoDB
-            // findOneAndUpdate will find a document with the guildId and update it, or create a new one if it doesn't exist (upsert: true)
+            // Save the entire configuration to MongoDB
             await GuildConfig.findOneAndUpdate(
-                { guildId: interaction.guild.id },
+                { guildId: interaction.guildId },
                 {
-                    panelChannelId: panelChannel.id,
-                    panelMessageId: panelMessage.id,
-                    logChannelId: logChannel.id,
-                    supportRoleIds: [supportRole.id], // Stored as an array
-                    ticketCategoryId: ticketCategory.id,
+                    guildId: interaction.guildId,
+                    buttonCategories: buttonCategories,
+                    messageId: message.id,
+                    channelId: channel.id,
                 },
                 { upsert: true, new: true }
             );
 
-            await interaction.editReply({ content: `Ticket panel has been successfully set up in ${panelChannel}.`, ephemeral: true });
+            await interaction.editReply(`✅ Successfully set up the role message in ${channel}!`);
 
         } catch (error) {
-            console.error('Error setting up the ticket panel:', error);
-            await interaction.editReply({ content: 'An error occurred while setting up the ticket panel. Please check my permissions and try again.', ephemeral: true });
+            console.error(error);
+            await interaction.editReply('❌ I do not have permission to send messages in that channel.');
         }
     },
 };
