@@ -5,11 +5,12 @@ const mongoose = require('mongoose');
 require('dotenv').config();
 
 // Ensure all required environment variables are present
-const { TOKEN, CLIENT_ID, MONGO_URI, GUILD_ID } = process.env;
+const { TOKEN, CLIENT_ID, MONGO_URI } = process.env;
 if (!TOKEN || !CLIENT_ID || !MONGO_URI) {
     console.error("❌ Error: TOKEN, CLIENT_ID, and MONGO_URI must be set in the .env file.");
     process.exit(1);
 }
+// Note: GUILD_ID is no longer required for the public version.
 
 // --- MAIN LOGIC ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -27,7 +28,7 @@ for (const file of commandFiles) {
     const command = require(filePath);
     if ('data' in command && 'execute' in command) {
         client.commands.set(command.data.name, command);
-        // New log for each command loaded
+        // Log for each command loaded
         console.log(`[+] Loaded command: /${command.data.name}`);
         commandsLoadedCount++;
     } else {
@@ -35,7 +36,7 @@ for (const file of commandFiles) {
     }
 }
 
-// New summary log
+// Summary log
 console.log(`\n✅ Successfully loaded a total of ${commandsLoadedCount} command(s).`);
 console.log('------------------------');
 
@@ -56,18 +57,18 @@ const deployCommands = async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
-        console.log(`🚀 Started refreshing ${commands.length} application (/) commands.`);
+        console.log(`🚀 Started refreshing ${commands.length} application (/) commands globally.`);
 
-        // CHOOSE ONE DEPLOYMENT METHOD:
-
-        // 1. GLOBAL DEPLOYMENT (Recommended for production)
-        // Takes up to an hour to update on all servers.
+        // 1. GLOBAL DEPLOYMENT (Required for public bots)
+        // This makes commands available on all servers the bot joins.
+        // NOTE: It can take up to one hour for commands to appear on servers.
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log(`✅ Successfully reloaded ${commands.length} application (/) commands globally.`);
 
-        // 2. GUILD-SPECIFIC DEPLOYMENT (Recommended for testing)
-        // Updates instantly for one server. Requires GUILD_ID in .env file.
+        // 2. GUILD-SPECIFIC DEPLOYMENT (Commented out)
+        // This is only for fast testing on a single server.
         /*
+        const { GUILD_ID } = process.env;
         if (!GUILD_ID) return console.error("❌ Error: GUILD_ID is not set in the .env file for guild-specific deployment.");
         await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
         console.log(`✅ Successfully reloaded ${commands.length} application (/) commands for the test guild.`);
@@ -100,7 +101,7 @@ const startBot = async () => {
                 await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
             }
         });
-        
+
         // Dynamic Button Interaction Listener
         client.on(Events.InteractionCreate, require('./src/events/buttonHandler'));
 
