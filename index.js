@@ -34,6 +34,11 @@ mongoConnect();
 
 // ================== 5️⃣ Deploy Global Commands ==================
 async function deployGlobalCommands() {
+  if (!process.env.CLIENT_ID) {
+    console.error("❌ CLIENT_ID missing in .env. Global commands not deployed!");
+    return;
+  }
+
   const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
   const commands = commandFiles.map(f => require(f).data.toJSON());
@@ -50,7 +55,14 @@ async function deployGlobalCommands() {
 // Deploy commands on startup
 deployGlobalCommands();
 
-// ================== 6️⃣ Command Interaction Handler ==================
+// ================== 6️⃣ Ready Event (Inline) ==================
+client.once("ready", () => {
+  console.log(`✅ Bot logged in as ${client.user.tag}`);
+  console.log(`🔹 Loaded ${client.commands.size} commands`);
+  console.log(`🌐 Connected to ${client.guilds.cache.size} guild(s)`);
+});
+
+// ================== 7️⃣ Command Interaction Handler ==================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isCommand()) return;
 
@@ -68,7 +80,7 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-// ================== 7️⃣ Handle New Guilds ==================
+// ================== 8️⃣ Handle New Guilds ==================
 client.on("guildCreate", async guild => {
   console.log(`➡️ Joined new guild: ${guild.name} (${guild.id})`);
 
@@ -94,5 +106,5 @@ client.on("guildCreate", async guild => {
   }
 });
 
-// ================== 8️⃣ Login ==================
-client.login(process.env.TOKEN).then(() => console.log("✅ Bot logged in!"));
+// ================== 9️⃣ Login ==================
+client.login(process.env.TOKEN).then(() => console.log("🔑 Logging in..."));
