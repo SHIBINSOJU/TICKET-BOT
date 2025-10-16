@@ -2,3 +2,7 @@
   "start": "node index.js",
   "dev": "nodemon index.js"
 }
+"scripts": {
+  "start": "node .",
+  "deploy": "node deploy-commands.js"
+},
